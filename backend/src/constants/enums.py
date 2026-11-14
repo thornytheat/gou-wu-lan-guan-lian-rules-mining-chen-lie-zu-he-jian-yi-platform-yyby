@@ -57,6 +57,22 @@ class SlotStatus(str, Enum):
     ARCHIVED = "archived"
 
 
+class ScheduleStatus(str, Enum):
+    """排期占用的存储状态（生效/结束日期不动，只标记是否仍有效）。"""
+
+    SCHEDULED = "scheduled"  # 有效占用
+    REPLACED = "replaced"    # 已被新版本替换（保留旧版排期可查）
+
+
+class SchedulePhase(str, Enum):
+    """排期占用的展示阶段（由 生效/结束日期 与今天的关系推导，不落库）。"""
+
+    PENDING = "pending"    # 待生效（生效日期 > 今天，调整时只允许替换这部分）
+    ACTIVE = "active"      # 生效中（已执行，保持原样）
+    DONE = "done"          # 已结束（已执行，保持原样）
+    REPLACED = "replaced"  # 已替换
+
+
 class Channel(str, Enum):
     """小票来源渠道。"""
 
@@ -95,6 +111,18 @@ SLOT_STATUS_LABELS: dict[str, str] = {
     SlotStatus.DRAFT.value: "待发布",
     SlotStatus.PUBLISHED.value: "已发布",
     SlotStatus.ARCHIVED.value: "已归档",
+}
+
+SCHEDULE_STATUS_LABELS: dict[str, str] = {
+    ScheduleStatus.SCHEDULED.value: "有效占用",
+    ScheduleStatus.REPLACED.value: "已替换",
+}
+
+SCHEDULE_PHASE_LABELS: dict[str, str] = {
+    SchedulePhase.PENDING.value: "待生效",
+    SchedulePhase.ACTIVE.value: "生效中",
+    SchedulePhase.DONE.value: "已结束",
+    SchedulePhase.REPLACED.value: "已替换",
 }
 
 CHANNEL_LABELS: dict[str, str] = {

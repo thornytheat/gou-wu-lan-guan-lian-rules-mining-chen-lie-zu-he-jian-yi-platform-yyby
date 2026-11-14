@@ -3,6 +3,7 @@
 自然键：
   User.email / Sku.code / OrderBasket.basket_no / MiningRun.run_label
   / RuleCandidate.rule_key（= run_label + 规则键）/ PlanogramSlot.slot_key
+  / PlanogramSchedule.schedule_key
 
 每次结束打印一行（键名与顺序为批次契约，逐字一致）：
   SEED_SUMMARY brand=basketrule skus=40 baskets=3000 rules=6 slots=1 users=3
@@ -10,15 +11,16 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import func, select
 
 from src.config.database import session_scope
-from src.constants.enums import SlotStatus
+from src.constants.enums import ScheduleStatus, SlotStatus
 from src.models.mining_run import MiningRun
 from src.models.order_basket import OrderBasket
+from src.models.planogram_schedule import PlanogramSchedule
 from src.models.planogram_slot import PlanogramSlot
 from src.models.rule_candidate import RuleCandidate
 from src.models.sku import Sku
@@ -128,21 +130,18 @@ def seed_run(db, analyst: User) -> tuple[MiningRun, bool]:
 
 def seed_plan(db, admin: User, run: MiningRun) -> None:
     slot_key = f"{fixtures.PLAN_CODE_SEED}-N01>N02"
-    existing = db.execute(select(PlanogramSlot).where(PlanogramSlot.slot_key == slot_key)).scalar_one_or_none()
-    if existing is not None:
-        _skipped("PlanogramSlot", slot_key)
-        return
-    rule = db.execute(
-        select(RuleCandidate).where(
-            RuleCandidate.run_id == run.id, RuleCandidate.rule_key.like("%N01>N02")
-        )
-    ).scalars().first()
-    if rule is None:
-        _skipped("PlanogramSlot", slot_key)
-        return
-    meta = fixtures_loader.zone_payload("N01>N02")
-    db.add(
-        PlanogramSlot(
+    slot = db.execute(select(PlanogramSlot).where(PlanogramSlot.slot_key == slot_key)).scalar_one_or_none()
+    if slot is None:
+        rule = db.execute(
+            select(RuleCandidate).where(
+                RuleCandidate.run_id == run.id, RuleCandidate.rule_key.like("%N01>N02")
+            )
+        ).scalars().first()
+        if rule is None:
+            _skipped("PlanogramSlot", slot_key)
+            return
+        meta = fixtures_loader.zone_payload("N01>N02")
+        slot = PlanogramSlot(
             slot_key=slot_key,
             plan_code=fixtures.PLAN_CODE_SEED,
             rule_id=rule.id,
@@ -155,9 +154,37 @@ def seed_plan(db, admin: User, run: MiningRun) -> None:
             note="上周（W44）店长已执行的样板位，保留作对照。",
             published_at=datetime(2026, 11, 2, 9, 30, tzinfo=timezone.utc),
         )
+        db.add(slot)
+        db.flush()
+        _created("PlanogramSlot", slot_key)
+    else:
+        _skipped("PlanogramSlot", slot_key)
+
+    # 样板位的排期占用：W45 当周正在执行（生效中），用于演示跨建议单冲突核对
+    schedule_key = f"{slot_key}@2026-11-03"
+    existing = db.execute(
+        select(PlanogramSchedule).where(PlanogramSchedule.schedule_key == schedule_key)
+    ).scalar_one_or_none()
+    if existing is not None:
+        _skipped("PlanogramSchedule", schedule_key)
+        return
+    db.add(
+        PlanogramSchedule(
+            schedule_key=schedule_key,
+            plan_code=fixtures.PLAN_CODE_SEED,
+            slot_id=slot.id,
+            slot_key=slot.slot_key,
+            conflict_group=slot.conflict_group,
+            zone=slot.zone,
+            shelf_label=slot.shelf_label,
+            rule_label="精酿啤酒 500ml → 盐焗花生 80g",
+            effective_date=date(2026, 11, 3),
+            end_date=date(2026, 11, 16),
+            status=ScheduleStatus.SCHEDULED.value,
+        )
     )
     db.flush()
-    _created("PlanogramSlot", slot_key)
+    _created("PlanogramSchedule", schedule_key)
 
 
 def seed_all() -> dict:

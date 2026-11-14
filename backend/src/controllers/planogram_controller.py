@@ -1,12 +1,14 @@
-"""陈列建议：生成 / 查询 / 发布 / 导出工单。"""
+"""陈列建议：生成 / 查询 / 发布（排期切换）/ 排期核对 / 导出工单。"""
 from __future__ import annotations
+
+from datetime import date
 
 from fastapi import Response
 from sqlalchemy.orm import Session
 
 from src.models.user import User
-from src.schemas.planogram import GeneratePlanRequest, SlotUpdateRequest
-from src.services import export_service, planogram_service
+from src.schemas.planogram import GeneratePlanRequest, ScheduleWindowRequest, SlotUpdateRequest
+from src.services import export_service, planogram_service, schedule_service
 
 
 def list_plans(db: Session, role: str) -> dict:
@@ -27,8 +29,32 @@ def get_plan(db: Session, plan_code: str, role: str) -> dict:
     return plan
 
 
-def publish(db: Session, user: User, plan_code: str, trace_id: str = "") -> dict:
-    return planogram_service.publish_plan(db, user, plan_code, trace_id=trace_id)
+def publish(
+    db: Session,
+    user: User,
+    plan_code: str,
+    payload: ScheduleWindowRequest | None,
+    trace_id: str = "",
+) -> dict:
+    effective_date = payload.effective_date if payload else None
+    end_date = payload.end_date if payload else None
+    return planogram_service.publish_plan(
+        db, user, plan_code, effective_date=effective_date, end_date=end_date, trace_id=trace_id
+    )
+
+
+def preview_schedule(
+    db: Session,
+    plan_code: str,
+    payload: ScheduleWindowRequest | None,
+) -> dict:
+    effective_date = payload.effective_date if payload else None
+    end_date = payload.end_date if payload else None
+    return schedule_service.preview_schedule(db, plan_code, effective_date, end_date)
+
+
+def schedule_overview(db: Session, date_from: date | None, date_to: date | None) -> dict:
+    return schedule_service.overview(db, date_from, date_to)
 
 
 def update_slot(db: Session, user: User, slot_id: str, payload: SlotUpdateRequest, trace_id: str = "") -> dict:

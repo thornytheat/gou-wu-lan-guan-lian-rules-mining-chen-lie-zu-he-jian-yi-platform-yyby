@@ -7,12 +7,14 @@ export const RUN_STATUSES = ['queued', 'running', 'succeeded', 'failed'] as cons
 export const RULE_STATUSES = ['candidate', 'adopted', 'rejected', 'parked'] as const
 export const REVIEW_DECISIONS = ['adopt', 'reject', 'park'] as const
 export const SLOT_STATUSES = ['draft', 'published', 'archived'] as const
+export const SCHEDULE_PHASES = ['pending', 'active', 'done', 'replaced'] as const
 
 export type StoreTier = (typeof STORE_TIERS)[number]
 export type RunStatus = (typeof RUN_STATUSES)[number]
 export type RuleStatus = (typeof RULE_STATUSES)[number]
 export type ReviewDecision = (typeof REVIEW_DECISIONS)[number]
 export type SlotStatus = (typeof SLOT_STATUSES)[number]
+export type SchedulePhase = (typeof SCHEDULE_PHASES)[number]
 
 export const TIER_LABELS: Record<StoreTier, string> = {
   high: '高客流店',
@@ -44,6 +46,13 @@ export const SLOT_STATUS_LABELS: Record<SlotStatus, string> = {
   draft: '待发布',
   published: '已发布',
   archived: '已归档',
+}
+
+export const SCHEDULE_PHASE_LABELS: Record<SchedulePhase, string> = {
+  pending: '待生效',
+  active: '生效中',
+  done: '已结束',
+  replaced: '已替换',
 }
 
 export const CHANNEL_LABELS: Record<string, string> = {

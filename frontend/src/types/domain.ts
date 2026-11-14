@@ -3,6 +3,7 @@ export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed'
 export type RuleStatus = 'candidate' | 'adopted' | 'rejected' | 'parked'
 export type ReviewDecision = 'adopt' | 'reject' | 'park'
 export type SlotStatus = 'draft' | 'published' | 'archived'
+export type SchedulePhase = 'pending' | 'active' | 'done' | 'replaced'
 
 export interface RunParams {
   min_support: number
@@ -195,6 +196,7 @@ export interface PlanSlot {
   note: string
   published_at: string | null
   buyer_hint: string
+  schedule: ScheduleRow | null
   rule: {
     id: string
     rule_key: string
@@ -210,6 +212,72 @@ export interface PlanSlot {
     status: RuleStatus
     uplift_month: number
   } | null
+}
+
+export interface ScheduleRow {
+  id: string | null
+  schedule_key: string
+  plan_code: string
+  slot_id: string | null
+  slot_key: string
+  conflict_group: string
+  zone: string
+  shelf_label: string
+  rule_label: string
+  effective_date: string
+  end_date: string
+  status: string
+  phase: SchedulePhase
+}
+
+export interface ScheduleConflict {
+  conflict_group: string
+  zone: string
+  plans: string[]
+  rows: ScheduleRow[]
+  overlap_start: string
+  overlap_end: string
+}
+
+export interface ScheduleCounts {
+  keep: number
+  unchanged: number
+  replaced: number
+  created: number
+  released: number
+  conflicts: number
+}
+
+export interface SchedulePreview {
+  plan_code: string
+  today: string
+  window: { effective_date: string | null; end_date: string | null }
+  ok: boolean
+  keep: ScheduleRow[]
+  unchanged: ScheduleRow[]
+  replace: Array<{ old: ScheduleRow; new: ScheduleRow }>
+  create: ScheduleRow[]
+  release: ScheduleRow[]
+  conflicts: ScheduleConflict[]
+  available: string[]
+  final: ScheduleRow[]
+  counts: ScheduleCounts
+}
+
+export interface SchedulePosition {
+  conflict_group: string
+  zone: string
+  state: 'available' | 'occupied' | 'conflict'
+  occupancies: ScheduleRow[]
+}
+
+export interface ScheduleOverview {
+  today: string
+  window: { from: string; to: string }
+  positions: SchedulePosition[]
+  conflicts: ScheduleConflict[]
+  available: string[]
+  summary: { positions: number; available: number; occupied: number; conflicts: number }
 }
 
 export interface PlanBasis {
@@ -231,6 +299,7 @@ export interface Plan {
   slots: PlanSlot[]
   skipped: Array<{ rule_key: string; label: string; reason: string }>
   params: RunParams
+  schedule?: SchedulePreview
 }
 
 export interface PlanSummary {

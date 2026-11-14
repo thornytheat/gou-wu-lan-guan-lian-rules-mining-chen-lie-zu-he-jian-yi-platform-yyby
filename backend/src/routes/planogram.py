@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, Request
+from datetime import date
+
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from src.config.database import get_db
@@ -6,7 +8,7 @@ from src.controllers import planogram_controller
 from src.middlewares.rbac import require_permission
 from src.middlewares.rate_limit import rate_limit
 from src.models.user import User
-from src.schemas.planogram import GeneratePlanRequest, SlotUpdateRequest
+from src.schemas.planogram import GeneratePlanRequest, ScheduleWindowRequest, SlotUpdateRequest
 
 router = APIRouter(tags=["planogram"])
 
@@ -32,6 +34,16 @@ def generate(
     )
 
 
+@router.get("/planogram/schedule/overview")
+def schedule_overview(
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("planogram:read")),
+) -> dict:
+    return planogram_controller.schedule_overview(db, date_from, date_to)
+
+
 @router.get("/planogram/{plan_code}")
 def get_plan(
     plan_code: str,
@@ -41,15 +53,26 @@ def get_plan(
     return planogram_controller.get_plan(db, plan_code, user.role)
 
 
+@router.post("/planogram/{plan_code}/schedule/preview")
+def preview_schedule(
+    plan_code: str,
+    payload: ScheduleWindowRequest | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("planogram:write")),
+) -> dict:
+    return planogram_controller.preview_schedule(db, plan_code, payload)
+
+
 @router.post("/planogram/{plan_code}/publish")
 def publish(
     plan_code: str,
     request: Request,
+    payload: ScheduleWindowRequest | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(require_permission("planogram:publish")),
 ) -> dict:
     return planogram_controller.publish(
-        db, user, plan_code, trace_id=getattr(request.state, "trace_id", "")
+        db, user, plan_code, payload, trace_id=getattr(request.state, "trace_id", "")
     )
 
 

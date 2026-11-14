@@ -31,7 +31,13 @@ from src.constants.log_templates import (  # noqa: E402
 from src.models.planogram_slot import PlanogramSlot  # noqa: E402
 from src.models.rule_candidate import RuleCandidate  # noqa: E402
 from src.models.user import User  # noqa: E402
-from src.services import audit_service, basket_service, fixtures_loader, mining_service  # noqa: E402
+from src.services import (  # noqa: E402
+    audit_service,
+    basket_service,
+    fixtures_loader,
+    mining_service,
+    schedule_service,
+)
 from src.utils.errors import AppError  # noqa: E402
 
 
@@ -169,6 +175,7 @@ def get_plan(db: Session, plan_code: str, role: str) -> dict | None:
     run = None
     if rules:
         run = mining_service.get_run(db, str(next(iter(rules.values())).run_id))
+    schedule_map = schedule_service.plan_schedule_map(db, plan_code)
     payload_slots = []
     for slot in slots:
         rule = rules.get(slot.rule_id)
@@ -185,6 +192,7 @@ def get_plan(db: Session, plan_code: str, role: str) -> dict | None:
                 "status": slot.status,
                 "note": slot.note,
                 "published_at": slot.published_at.isoformat() if slot.published_at else None,
+                "schedule": schedule_map.get(slot.slot_key),
                 "rule": None
                 if rule is None
                 else {
@@ -237,26 +245,46 @@ def get_plan(db: Session, plan_code: str, role: str) -> dict | None:
     }
 
 
-def publish_plan(db: Session, user: User, plan_code: str, trace_id: str = "") -> dict:
+def publish_plan(
+    db: Session,
+    user: User,
+    plan_code: str,
+    effective_date=None,
+    end_date=None,
+    trace_id: str = "",
+) -> dict:
+    """发布建议单 = 原子切换排期：建议位发布 + 排期占用在同一事务里生效。
+
+    - 同一发布重跑：建议位已发布不重复打时间戳，排期命中同键占用 → 幂等无变化；
+    - 调整方案：只替换尚未生效的占用，已执行部分保持原样；
+    - 切换失败（冲突 / 日期非法 / 任何异常）：整体回滚，旧版排期原样保留。
+    """
     slots = list(db.execute(select(PlanogramSlot).where(PlanogramSlot.plan_code == plan_code)).scalars())
     if not slots:
         raise AppError(codes.NOT_FOUND, "建议单不存在", f"plan_code={plan_code}")
-    if all(slot.status == SlotStatus.PUBLISHED.value for slot in slots):
-        return get_plan(db, plan_code, user.role)
-    for slot in slots:
-        slot.status = SlotStatus.PUBLISHED.value
-        slot.published_at = _now()
-    audit_service.record(
-        db,
-        action=ACTION_PLANOGRAM_PUBLISH,
-        actor=user,
-        entity_type="planogram_slot",
-        entity_id=plan_code,
-        detail={"plan_code": plan_code, "slots": len(slots)},
-        trace_id=trace_id,
-    )
-    db.commit()
-    return get_plan(db, plan_code, user.role)
+    try:
+        now = _now()
+        for slot in slots:
+            if slot.status == SlotStatus.DRAFT.value:
+                slot.status = SlotStatus.PUBLISHED.value
+                slot.published_at = now
+        schedule = schedule_service.apply_schedule(db, plan_code, slots, effective_date, end_date)
+        audit_service.record(
+            db,
+            action=ACTION_PLANOGRAM_PUBLISH,
+            actor=user,
+            entity_type="planogram_slot",
+            entity_id=plan_code,
+            detail={"plan_code": plan_code, "slots": len(slots), "schedule": schedule["counts"]},
+            trace_id=trace_id,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    plan = get_plan(db, plan_code, user.role)
+    plan["schedule"] = schedule
+    return plan
 
 
 def update_slot(db: Session, user: User, slot_id: str, status: str, note: str = "", trace_id: str = "") -> dict:

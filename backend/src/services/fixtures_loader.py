@@ -25,3 +25,8 @@ def zone_payload(rule_key: str) -> dict:
         "shelf_label": meta.get("shelf_label", "待定货架位"),
         "note": meta.get("note", ""),
     }
+
+
+def zone_directory() -> dict[str, str]:
+    """货架分区编码 → 展示名（排期总览用）；fixture 未覆盖的编码由调用方回退为编码本身。"""
+    return {spec["zone_code"]: spec["zone"] for spec in fixtures.PAIR_BUNDLES if spec.get("zone_code")}

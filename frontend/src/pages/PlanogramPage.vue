@@ -11,6 +11,14 @@
             {{ item.plan_code }} · {{ item.slot_count }} 位 · {{ SLOT_STATUS_LABELS[item.status] }}
           </option>
         </select>
+        <label class="win" title="排期生效日期（默认明天）">
+          <span class="win__label">生效</span>
+          <input v-model="effDate" class="field win__date" type="date" data-test="publish-eff" :disabled="!canPublish" />
+        </label>
+        <label class="win" title="排期结束日期（默认生效起 14 天）">
+          <span class="win__label">结束</span>
+          <input v-model="endDate" class="field win__date" type="date" data-test="publish-end" :disabled="!canPublish" />
+        </label>
         <button
           class="btn"
           type="button"
@@ -25,12 +33,13 @@
           class="btn btn--mint"
           type="button"
           data-test="publish-plan"
-          :disabled="!canPublish || working || !plan || plan.status === 'published'"
-          :title="canPublish ? '' : '仅品类总监可发布'"
+          :disabled="!canPublish || working || !plan"
+          :title="canPublish ? '按生效/结束日期切换排期；冲突时保留旧版排期' : '仅品类总监可发布'"
           @click="publish"
         >
-          {{ plan?.status === 'published' ? '已发布' : '发布建议单' }}
+          {{ plan?.status === 'published' ? '重排发布' : '发布建议单' }}
         </button>
+        <RouterLink class="btn" to="/schedule" data-test="goto-schedule">排期核对</RouterLink>
         <a
           class="btn"
           :class="{ 'is-disabled': !canExport }"
@@ -83,6 +92,11 @@
               <span class="shelf__index">{{ String(slot.position_index).padStart(2, '0') }}</span>
               <span class="shelf__zone">{{ slot.zone }}</span>
               <span class="shelf__label">{{ slot.shelf_label }}</span>
+              <span v-if="slot.schedule" class="shelf__dates" :class="`shelf__dates--${slot.schedule.phase}`">
+                {{ slot.schedule.effective_date }} → {{ slot.schedule.end_date }} ·
+                {{ SCHEDULE_PHASE_LABELS[slot.schedule.phase] }}
+              </span>
+              <span v-else class="shelf__dates shelf__dates--none">未排期</span>
             </div>
 
             <div class="shelf__goods">
@@ -168,13 +182,23 @@ import EmptyState from '../components/common/EmptyState.vue'
 import { usePlanogramStore } from '../stores/planogramStore'
 import { useAuthStore } from '../stores/authStore'
 import { MESSAGES } from '../constants/messages'
-import { RULE_STATUS_LABELS, SLOT_STATUS_LABELS } from '../constants/enums'
+import { RULE_STATUS_LABELS, SCHEDULE_PHASE_LABELS, SLOT_STATUS_LABELS } from '../constants/enums'
 import { formatCurrency, formatPercent } from '../utils/format'
 import { planogramExportUrl } from '../api/planogram'
 
 const store = usePlanogramStore()
 const auth = useAuthStore()
 const working = ref(false)
+
+function isoDay(offset: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() + offset)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+const effDate = ref(isoDay(1))
+const endDate = ref(isoDay(14))
 
 const plan = computed(() => store.current)
 const plans = computed(() => store.plans)
@@ -221,7 +245,7 @@ async function publish() {
   if (!plan.value) return
   working.value = true
   try {
-    await store.publish(plan.value.plan_code)
+    await store.publish(plan.value.plan_code, { effective_date: effDate.value, end_date: endDate.value })
   } catch {
     /* store 已记录 */
   } finally {
@@ -274,6 +298,33 @@ onMounted(loadAll)
 .plan-select {
   max-width: 250px;
   font-size: 11.5px;
+}
+.win {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.win__label {
+  font-size: 10.5px;
+  color: var(--ink-faint);
+}
+.win__date {
+  width: 132px;
+  font-size: 11.5px;
+  padding: 6px 8px;
+}
+.shelf__dates {
+  font-family: var(--tag-font);
+  font-size: 9.5px;
+  letter-spacing: 0.03em;
+  color: var(--mint-ink);
+}
+.shelf__dates--pending {
+  color: var(--tag-deep);
+}
+.shelf__dates--done,
+.shelf__dates--none {
+  color: var(--ink-faint);
 }
 .strip {
   margin-top: 14px;

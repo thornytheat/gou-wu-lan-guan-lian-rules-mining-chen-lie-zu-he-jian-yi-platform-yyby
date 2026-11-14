@@ -27,7 +27,8 @@
 5. 09:20 生成陈列建议：K=6 贪心背包，`白酒 → 卤味` 与 `啤酒 → 花生` 争用端架 A，剔除增量更低的一条 → **5 个货架位**。
 6. 09:25 预估月增量 **¥12,480**（5 席合计，口径见 §4）。
 7. 09:28 品类总监沈亦舟复核，批量采纳 **3 条**（啤酒→花生、方便面→香肠、可乐→薯片）。
-8. 09:32 发布建议单，店长端（viewer）立即可见，但不能改参数 / 复核 / 导出。
+8. 09:32 打开「货架位排期」核对：默认窗口（明天起 14 天）与 W44 样板单在端架 A1 冲突（11-15 ~ 11-16 重叠）→
+   生效日期调整为 **11-17** 后预览通过 → 发布建议单，店长端（viewer）立即可见，但不能改参数 / 复核 / 导出。
 9. 09:35 导出工单 CSV：表头 + **3 行**（只含已采纳规则）。
 10. 09:40 审计日志记录登录、跑挖掘、复核、发布、导出五类动作，含 trace_id。
 
@@ -39,6 +40,9 @@
 3. **稳定性与归因**（`/rules/:id`）：共现矩阵热力图（SVG 自绘）、三层门店 lift + Wilson 区间、反例小票、增量口径拆解、
    复核记录（采纳 / 挂起 / 驳回，理由必填写入审计）。
 4. **陈列建议与工单**（`/planogram`）：货架位可视化、冲突组消解说明、预估月增量、发布、工单 CSV 导出、建议单历史。
+5. **货架位排期**（`/schedule`）：按生效 / 结束日期占用货架位，发布前一次看清跨建议单冲突；
+   可用位、冲突组合、最终结果同页核对；调整只替换尚未生效的占用，已执行部分保持原样；
+   同一发布重跑幂等不重复占位，切换失败整体回滚保留旧版排期。
 
 横切：JWT + 三角色 RBAC（低权角色调高权接口真实 403）、审计日志、Redis 滑动窗口限流、统一错误收敛。
 
@@ -55,8 +59,8 @@ docker compose ps             # 等 5/5 healthy（首次约 60-90s）
 - 后端 OpenAPI：<http://localhost:19259/api/docs>（直连；前端统一走 Nginx 的 `/api/` 反代）
 - 数据库：`localhost:17759`（PostgreSQL 16，schema `basketrule`）
 
-`SEED_DEMO=true` 时 backend 启动会自动执行一次幂等 seed（3,000 张小票 + 1 个演示挖掘批次 + 1 个已发布样板位 + 3 个账号），
-也可手动重跑：
+`SEED_DEMO=true` 时 backend 启动会自动执行一次幂等 seed（3,000 张小票 + 1 个演示挖掘批次 + 1 个已发布样板位
+及其生效中的排期占用（端架 A1，2026-11-03 ~ 11-16）+ 3 个账号），也可手动重跑：
 
 ```bash
 docker compose exec backend python -m scripts.seed_demo
@@ -117,6 +121,18 @@ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $VIEWER_TOKEN
   6 条规则里 `白酒 → 卤味` 与 `啤酒 → 花生` 同属端架 A → 剔除 1 条 → **5 个货架位、合计月增量 ¥12,480**
   （51+41+37+35+44 = 208 张共现 × ¥40.00 × 0.35 × 30/7）。
 
+### 排期口径（`schedule_core.py` 纯函数 / `schedule_service.py` 落库）
+
+- **占用**：发布 = 建议单每个在位建议位产生一条排期占用（货架位 = 冲突组分区，生效 → 结束日期，闭区间）。
+  缺省窗口：明天起 14 天；已排期的建议位重跑时沿用现有窗口。
+- **阶段**：生效日期 > 今天 → 待生效；结束日期 < 今天 → 已结束；其余 → 生效中；被替换的旧版 → 已替换（保留可查）。
+- **调整**：只有待生效占用可被替换 / 释放；已生效、已结束的占用无条件保持原样。
+- **幂等**：同建议位 + 同生效/结束日期重跑 → 原样保留不重复占位；
+  数据库以「每建议位至多一条有效占用」部分唯一索引兜底。
+- **冲突**：同一货架位上不同建议单的占用日期区间相交（端点相接也算）→ 冲突组合；
+  预览可见，发布时阻断（409），整个事务回滚，旧版排期原样保留。
+- **原子性**：建议位发布 + 排期切换在同一事务提交；任何一步失败全部回滚。
+
 **可复现**：seed 用固定 `random.Random(20261112)` 生成小票，价格经过一次性调参使客单均值精确为 ¥40.00；
 两次 seed 输出同一行 `SEED_SUMMARY`。
 
@@ -144,9 +160,9 @@ gb-586/
 │   └── src/
 │       ├── config/                 # settings / database / app / celery_app
 │       ├── constants/              # enums（共享枚举）/ roles / error_codes / limits / log_templates
-│       ├── models/                 # user / sku / order_basket / mining_run / rule_candidate / rule_review / planogram_slot / audit_log
+│       ├── models/                 # user / sku / order_basket / mining_run / rule_candidate / rule_review / planogram_slot / planogram_schedule / audit_log
 │       ├── schemas/                # auth / basket / mining / rule / planogram
-│       ├── services/               # apriori / stability / planogram / mining / rule / basket / export / audit / auth
+│       ├── services/               # apriori / stability / planogram(+core) / schedule(+core) / mining / rule / basket / export / audit / auth
 │       ├── controllers/ routes/    # 7 组路由，统一 /api 前缀
 │       ├── middlewares/            # auth / rbac / audit_logger / error_handler / rate_limit
 │       └── utils/                  # jwt / password / stats(Wilson) / redis / errors / logger
@@ -183,11 +199,11 @@ gb-586/
 
 ## 10. 共享枚举出现位置
 
-**枚举组 1：门店分层 / 批次状态 / 规则状态 / 复核动作 / 建议位状态 / 小票渠道**
+**枚举组 1：门店分层 / 批次状态 / 规则状态 / 复核动作 / 建议位状态 / 排期状态与阶段 / 小票渠道**
 
 | 位置 | 作用 |
 |---|---|
-| `backend/src/constants/enums.py` | 定义 `StoreTier` `RunStatus` `RuleStatus` `ReviewDecision` `SlotStatus` `Channel` + 中文标签 |
+| `backend/src/constants/enums.py` | 定义 `StoreTier` `RunStatus` `RuleStatus` `ReviewDecision` `SlotStatus` `ScheduleStatus` `SchedulePhase` `Channel` + 中文标签 |
 | `backend/src/models/*.py` | 列默认值（`status` 默认 `queued` / `candidate` / `draft`） |
 | `backend/src/schemas/*.py` | `ReviewRequest.decision`、`SlotUpdateRequest.status` 的 Literal 校验 |
 | `backend/src/services/{mining,rule,planogram,export}_service.py` | 状态流转与标签映射 |

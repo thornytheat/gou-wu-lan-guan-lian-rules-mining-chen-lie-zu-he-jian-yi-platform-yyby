@@ -5,5 +5,6 @@ export const MESSAGES = {
   emptyPlans: '还没有陈列建议单。先跑一次挖掘，再点「生成陈列建议」。',
   offline: '接口暂时不可用，请确认 5 个容器都是 healthy 后重试。',
   viewerHint: '店长账号只读：可以查看已发布的陈列建议与规则详情，不能运行挖掘、复核或导出。',
+  viewerScheduleHint: '店长账号只读：可以查看货架位排期与冲突组合，不能预览调整或发布。',
   conflictHint: '同冲突组只取增量更高的一条；被剔除的规则仍保留在规则列表里。',
 }
